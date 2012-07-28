@@ -1,0 +1,82 @@
+#!/bin/bash
+
+# Change this to 'echo' to only output the commands, or 'eval' to run them. 
+CMD='eval'
+
+user=root
+host=localhost
+# Don't dump watchdog tables by default
+watchdog=0
+
+usage()
+{
+ cat <<EOF
+usage: $0 <user> <pass> <host> <kola_db_name>
+
+example: $0 --user=root --pass=supersecurepassword --host=localhost --db=uc_jp
+
+This script will dump a Drupal 6 Kola database, and output SQL to stdout.
+
+PARAMETERS:
+  --user	mysql username. Defaults to root.
+  --pass	mysql password.
+  --host	mysql host. Defaults to localhost
+  --db		mysql database.
+
+OPTIONS:
+  --wd Dump the watchdog table's data. By default, this data is not exported.
+
+Use it like mysqldump. You can redirect the output to a .sql file.
+
+EOF
+}
+
+# Read the read in required parameters
+for i in $*; do
+ case $i in
+  --user=*)
+   user=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
+   ;;
+  --pass=*)
+   pass=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
+   ;;
+  --host=*)
+   host=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
+   ;;
+  --db=*)
+   db=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
+   ;;
+  --wd)
+   watchdog=1
+   ;;
+ esac
+done
+
+mysql_cmd="mysql -u$user -p$pass -h$host $db "
+
+# If no db is provided, then don't run the script.
+if [ -z $db ]
+then
+  usage
+  exit;
+fi
+
+#tables=( cache cache_apachesolr cache_block cache_bootstrap cache_coder cache_content cache_field cache_filter cache_form cache_image cache_menu cache_page cache_path cache_token cache_update cache_views cache_views_data )
+table_name_sql="SELECT table_name FROM information_schema.tables WHERE (table_schema = '$db' AND table_name like 'cache_%')" 
+
+
+if [ "$watchdog" -ne "1" ]
+then
+  table_name_sql="$table_name_sql OR (table_schema = '$db' AND table_name = 'watchdog')"
+fi
+
+tables=`echo "$table_name_sql" | $mysql_cmd --skip-column-names`
+
+for table in $tables; do
+ignore_tables="$ignore_tables --ignore-table=$db.$table "
+table_defs="$table_defs $table "
+done
+# Dump all the data sans cache tables.
+$CMD "mysqldump -u$user -p$pass -h$host $db $ignore_tables"
+# Dump the table definitions for the cache tables, adding them to the output.
+$CMD "mysqldump --no-data -u$user -p$pass -h$host $db $table_defs"
